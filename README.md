@@ -17,6 +17,9 @@ It shows:
 
 > No API key is required. Space-weather data is loaded directly from public NOAA/NASA services.
 
+<img width="1905" height="914" alt="image" src="https://github.com/user-attachments/assets/0b91d694-31e5-4225-bf6f-5c8604c41f78" />
+
+
 **Live demo (Vercel):** <https://aurora-zazzatis-projects.vercel.app/>
 
 ## Tech stack
