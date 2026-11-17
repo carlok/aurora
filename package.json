@@ -29,7 +29,8 @@
     "asbuild:release": "asc assembly/index.ts --target release",
     "asbuild": "npm run asbuild:debug && npm run asbuild:release",
     "test": "node --test",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "vercel-build": "rm -rf public && mkdir -p public && cp index.html public/ && cp -r build vendor public/"
   },
   "devDependencies": {
     "assemblyscript": "^0.28.20"
