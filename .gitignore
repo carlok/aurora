@@ -1,0 +1,12 @@
+node_modules/
+build/
+.DS_Store
+*.log
+.env
+.env.*
+.vscode/
+.idea/
+
+# Internal deployment/agent notes, not part of the public repository.
+PUBLISH_NL.md
+OpenCode.md

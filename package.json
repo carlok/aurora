@@ -1,0 +1,37 @@
+{
+  "name": "aurora-globe-3d",
+  "version": "1.0.0",
+  "description": "3D WebAssembly Earth and aurora viewer with public NOAA data, IGRF-14 field lines, real Sun/Moon ephemerides and a modelled solar wind veil.",
+  "license": "MIT",
+  "keywords": [
+    "aurora",
+    "webassembly",
+    "assemblyscript",
+    "webgl",
+    "space-weather",
+    "ovation",
+    "igrf",
+    "earth",
+    "astronomy"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./build/release.js",
+      "types": "./build/release.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "asbuild:debug": "asc assembly/index.ts --target debug",
+    "asbuild:release": "asc assembly/index.ts --target release",
+    "asbuild": "npm run asbuild:debug && npm run asbuild:release",
+    "test": "node --test",
+    "start": "node server.mjs"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.28.20"
+  }
+}
