@@ -1,0 +1,2354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Earth 3D · Aurora OVATION 3D</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --accent: #58e6a8;
+      --violet: #b07cff;
+      --bg: #02050c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body { font-family: "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace; color: #dce8f2; }
+    canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: grab; }
+    canvas.dragging { cursor: grabbing; }
+    canvas.panning { cursor: move; }
+
+    /* Mobile-first: the base rules below are the phone layout. The desktop
+       floating-panel layout is layered on top in the (min-width: 721px) and
+       (min-height: 501px) block near the end. */
+    .panel {
+      position: fixed;
+      background: rgba(6, 14, 26, 0.84);
+      border: 1px solid rgba(120, 200, 230, 0.16);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      /* Panels can be swiped toward the screen edge to tuck them away (see makeTuckable). */
+      transform: translate(calc(var(--base-x, 0px) + var(--tuck-x, 0px) + var(--drag-x, 0px)),
+                           calc(var(--tuck-y, 0px) + var(--drag-y, 0px)));
+      transition: transform 0.25s ease, opacity 0.25s ease;
+    }
+    .panel.dragging { transition: none; -webkit-user-select: none; user-select: none; }
+    .panel.tucked { opacity: 0; pointer-events: none; }
+
+    #hud {
+      top: calc(10px + env(safe-area-inset-top));
+      left: calc(10px + env(safe-area-inset-left));
+      right: calc(10px + env(safe-area-inset-right));
+      padding: 10px 16px 10px 12px;
+      font-size: 11px;
+      line-height: 1.5;
+      /* Leave room for the timeline; the expanded panel scrolls instead of overlapping it. */
+      max-height: calc(100vh - var(--timeline-h, 110px) - 30px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+      max-height: calc(100dvh - var(--timeline-h, 110px) - 30px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y; /* vertical drags scroll the panel, horizontal drags tuck it */
+    }
+    html.can-fs #hud { right: calc(60px + env(safe-area-inset-right)); }
+    #hud.tucked { --tuck-x: calc(-100% - 40px); }
+    #hud::after { /* grip: swipe left to tuck */
+      content: ""; position: absolute; right: 5px; top: 50%;
+      width: 4px; height: 28px; margin-top: -14px; border-radius: 2px;
+      background: rgba(185, 206, 224, 0.28);
+    }
+    #hud h1 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      letter-spacing: 0.22em;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    #hud .hudHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    #hudToggle {
+      flex: none;
+      margin: 0 0 6px;
+      font: inherit;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      color: #b9cee0;
+      background: rgba(120, 200, 230, 0.12);
+      border: 1px solid rgba(120, 200, 230, 0.18);
+      border-radius: 999px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    #hudDetails { display: none; }
+    #hud.expanded #hudDetails { display: block; }
+    #hud .row { display: flex; justify-content: space-between; gap: 18px; }
+    #hud .row span { color: #7e9bb5; }
+    #hud .row b { font-weight: 600; color: #eaf4ff; }
+    #hud .gauge {
+      margin-top: 6px; height: 7px; border-radius: 4px;
+      background: rgba(120, 200, 230, 0.12);
+      overflow: hidden;
+      border: 1px solid rgba(120, 200, 230, 0.1);
+    }
+    #gaugeFill {
+      height: 100%; width: 0%; border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.18s ease, background 0.18s ease;
+    }
+    #hud .note {
+      margin: 10px 0 0;
+      padding-top: 9px;
+      border-top: 1px solid rgba(120, 200, 230, 0.12);
+      color: #7e9bb5;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    #status {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      background: rgba(88, 230, 168, 0.14);
+      color: var(--accent);
+    }
+    #status.predicted { background: rgba(176, 124, 255, 0.16); color: var(--violet); }
+    #focusRow { margin-top: 8px; align-items: center; }
+    #focusRow span { flex: 1; }
+    .focusBtn {
+      font: inherit;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      color: #b9cee0;
+      background: rgba(120, 200, 230, 0.12);
+      border: 1px solid rgba(120, 200, 230, 0.18);
+      border-radius: 999px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    .focusBtn:hover { background: rgba(120, 200, 230, 0.22); }
+    #hud .toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .toggleBtn {
+      font: inherit;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      color: #041018;
+      background: var(--accent);
+      border: 0;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .toggleBtn:hover { filter: brightness(1.1); }
+    .toggleBtn[aria-pressed="false"] { color: #8fa9bf; background: rgba(120, 200, 230, 0.14); }
+    #legend { display: none; top: 18px; right: 18px; padding: 12px 14px; font-size: 10px; color: #7e9bb5; }
+    #legend .bar {
+      width: 150px; height: 8px; border-radius: 4px; margin-bottom: 6px;
+      background: linear-gradient(90deg, #28ff82, #9bff78, #ffdc50, #ff783c, #ff3cb4);
+    }
+    #legend .scale { display: flex; justify-content: space-between; }
+    #legend .title { color: #b9cee0; letter-spacing: 0.14em; margin-bottom: 7px; }
+
+    #timeline {
+      left: calc(10px + env(safe-area-inset-left));
+      right: calc(10px + env(safe-area-inset-right));
+      bottom: calc(10px + env(safe-area-inset-bottom));
+      padding: 12px 12px 8px;
+      touch-action: none; /* vertical drags on the panel tuck it */
+    }
+    #timeline.tucked { --tuck-y: calc(100% + 40px); }
+    #timeline::before { /* grip: swipe down to tuck */
+      content: ""; position: absolute; top: 4px; left: 50%;
+      width: 36px; height: 4px; margin-left: -18px; border-radius: 2px;
+      background: rgba(185, 206, 224, 0.28);
+    }
+    #timeline .top { display: flex; align-items: center; gap: 10px; }
+    #timeline .trackWrap { position: relative; flex: 1; display: flex; align-items: center; }
+    #timeline .trackWrap input { width: 100%; }
+    #nowMarker {
+      position: absolute; top: 7px; bottom: 7px; width: 1px; left: 50%;
+      background: rgba(235, 248, 255, 0.72);
+      box-shadow: 0 0 7px rgba(235, 248, 255, 0.7);
+      pointer-events: none;
+    }
+    #nowMarker::before {
+      content: ""; position: absolute; top: -3px; left: -2px;
+      width: 5px; height: 5px; border-radius: 50%; background: #eaf4ff;
+    }
+    #nowBtn {
+      flex: none;
+      font: inherit; font-size: 11px;
+      color: #041018;
+      background: var(--accent);
+      border: 0; border-radius: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+    }
+    #nowBtn:hover { filter: brightness(1.1); }
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 26px; background: transparent; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px; border-radius: 3px;
+      background: linear-gradient(90deg, rgba(88,230,168,0.45) 0%, rgba(88,230,168,0.22) var(--now-split, 50%), rgba(176,124,255,0.5) var(--now-split, 50%), rgba(176,124,255,0.28) 100%);
+      border: 1px solid rgba(120,200,230,0.18);
+    }
+    input[type="range"]::-moz-range-track {
+      height: 6px; border-radius: 3px;
+      background: linear-gradient(90deg, rgba(88,230,168,0.45) 0%, rgba(88,230,168,0.22) var(--now-split, 50%), rgba(176,124,255,0.5) var(--now-split, 50%), rgba(176,124,255,0.28) 100%);
+      border: 1px solid rgba(120,200,230,0.18);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 16px; height: 16px; margin-top: -6px;
+      border-radius: 50%; background: #eafff5;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 14px rgba(88, 230, 168, 0.8);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px;
+      border-radius: 50%; background: #eafff5;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 14px rgba(88, 230, 168, 0.8);
+    }
+    #timeline .labels { display: flex; justify-content: space-between; margin-top: 2px; font-size: 10px; color: #6f8ba3; }
+    #timeline .caption { margin-top: 4px; font-size: 10px; color: #8fa9bf; display: flex; justify-content: space-between; gap: 12px; }
+    #timeline .caption b { color: #eaf4ff; font-weight: 600; }
+    #timeline .caption .legendText { display: none; }
+
+    /* Tabs that bring a tucked panel back. */
+    .edgeTab {
+      position: fixed;
+      z-index: 5;
+      font: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: #041018;
+      background: var(--accent);
+      border: 0;
+      min-height: 36px;
+      padding: 10px 14px;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+      touch-action: none;
+    }
+    .edgeTab[hidden] { display: none; }
+    #hudTab {
+      top: calc(10px + env(safe-area-inset-top));
+      left: env(safe-area-inset-left);
+      border-radius: 0 999px 999px 0;
+    }
+    #timelineTab {
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: env(safe-area-inset-bottom);
+      border-radius: 999px 999px 0 0;
+    }
+
+    #fsBtn {
+      position: fixed;
+      z-index: 5;
+      top: calc(10px + env(safe-area-inset-top));
+      right: calc(10px + env(safe-area-inset-right));
+      width: 42px; height: 42px;
+      display: grid; place-items: center;
+      padding: 0;
+      color: #b9cee0;
+      background: rgba(6, 14, 26, 0.84);
+      border: 1px solid rgba(120, 200, 230, 0.16);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    #fsBtn[hidden] { display: none; }
+
+    #rotateHint {
+      position: fixed;
+      z-index: 5;
+      left: 50%;
+      transform: translateX(-50%);
+      /* above the timeline, or above its tab when the timeline is tucked */
+      bottom: calc(max(var(--timeline-h, 90px), 40px) + 16px + env(safe-area-inset-bottom));
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 5px 5px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      white-space: nowrap;
+      color: #dce8f2;
+      background: rgba(6, 14, 26, 0.84);
+      border: 1px solid rgba(120, 200, 230, 0.16);
+    }
+    #rotateHint button {
+      width: 30px; height: 30px; padding: 0;
+      font: inherit; font-size: 15px; line-height: 1;
+      color: #b9cee0;
+      background: rgba(120, 200, 230, 0.12);
+      border: 0; border-radius: 999px;
+      cursor: pointer;
+    }
+
+    #hint {
+      display: none;
+      position: fixed; right: 18px; bottom: 112px;
+      font-size: 10px; color: #5f7c95;
+      pointer-events: none; text-align: right;
+      line-height: 1.5;
+    }
+    #hint .hintTouch { display: none; }
+
+    #overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 45%, #081a30 0%, #02050c 70%);
+      z-index: 20; transition: opacity 0.5s ease; text-align: center;
+      padding: 24px;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    #overlay .box { max-width: 520px; }
+    #overlay .spinner {
+      width: 34px; height: 34px; margin: 0 auto 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(88, 230, 168, 0.2);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+    }
+    #overlay.error .spinner, #overlay.ready .spinner { display: none; }
+    #overlay h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.2em; color: var(--accent); }
+    #overlay p { margin: 0; font-size: 12px; color: #8fa9bf; line-height: 1.6; }
+    #overlay p.error { color: #ff8080; }
+    #startBtn {
+      margin-top: 20px;
+      min-height: 52px;
+      padding: 14px 38px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.24em;
+      color: #041018;
+      background: var(--accent);
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      box-shadow: 0 0 32px rgba(88, 230, 168, 0.45);
+    }
+    #startBtn[hidden] { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Phones in landscape: the HUD is a narrow left column, the timeline one slim bar. */
+    @media (max-height: 500px) {
+      #hud, html.can-fs #hud { right: auto; width: min(300px, 46vw); }
+      #timeline .labels { display: none; }
+    }
+    /* Portrait phones: suggest turning the phone (dismissible). */
+    @media (orientation: portrait) and (pointer: coarse) and (max-width: 720px) {
+      #rotateHint:not([hidden]) { display: flex; }
+    }
+    /* Touch screens: bigger targets, touch-oriented hint. */
+    @media (pointer: coarse) {
+      input[type="range"] { height: 36px; }
+      input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
+      input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; }
+      .focusBtn, .toggleBtn, #hudToggle { min-height: 32px; padding: 6px 12px; }
+      #nowBtn { min-height: 36px; }
+      #hint .hintMouse { display: none; }
+      #hint .hintTouch { display: inline; }
+    }
+    /* Desktop: floating blurred panels, all details visible, legend and hint shown. */
+    @media (min-width: 721px) and (min-height: 501px) {
+      .panel { background: rgba(6, 14, 26, 0.72); backdrop-filter: blur(10px); }
+      #hud, html.can-fs #hud {
+        top: 18px; left: 18px; right: auto;
+        padding: 14px 18px 14px 16px;
+        max-width: min(420px, calc(100vw - 36px));
+        max-height: none;
+        overflow: visible;
+        font-size: 12px;
+      }
+      #hud h1 { font-size: 13px; margin-bottom: 8px; }
+      #hudToggle { display: none; }
+      #hudDetails { display: block; }
+      #hud .note { font-size: 10.5px; }
+      #legend { display: block; }
+      #hint { display: block; }
+      #fsBtn { display: none; }
+      #timeline {
+        left: 50%; right: auto; --base-x: -50%;
+        bottom: 18px;
+        width: min(820px, calc(100vw - 36px));
+        padding: 14px 18px 12px;
+      }
+      #timeline .top { gap: 12px; }
+      #timeline .labels { margin-top: 6px; }
+      #timeline .caption { margin-top: 8px; font-size: 10.5px; }
+      #timeline .caption .legendText { display: inline; }
+      #hudTab { top: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <div id="hud" class="panel">
+    <div class="hudHead">
+      <h1>AURORA · 3D GLOBE</h1>
+      <button id="hudToggle" type="button" aria-expanded="false" aria-controls="hudDetails">MORE</button>
+    </div>
+    <div class="row"><span>Time</span><b id="timeLabel">—</b></div>
+    <div class="row"><span>Kp</span><b id="kpLabel">—</b></div>
+    <div class="row"><span>Aurora</span><b id="auraLabel">—</b></div>
+    <div class="gauge"><div id="gaugeFill"></div></div>
+    <div id="status">LOADING</div>
+    <div id="hudDetails">
+    <div class="row" style="margin-top:8px"><span>OVATION shape</span><b id="refLabel">—</b></div>
+    <div class="row"><span>Altitude</span><b>90–220 km · model</b></div>
+    <div class="row"><span>Moon</span><b id="moonLabel">—</b></div>
+    <div class="row"><span>Sun</span><b id="sunLabel">—</b></div>
+    <div class="row" id="focusRow"><span>Go to</span><button id="focusMoon" class="focusBtn" type="button">MOON</button><button id="focusSun" class="focusBtn" type="button">SUN</button></div>
+    <div class="toggles">
+      <button id="fieldBtn" class="toggleBtn" type="button" aria-pressed="true">FIELD ON</button>
+      <button id="windBtn" class="toggleBtn" type="button" aria-pressed="true">WIND ON</button>
+      <button id="lockBtn" class="toggleBtn" type="button" aria-pressed="false" title="Freeze Earth; time changes move the celestial frame instead.">EARTH LOCK: OFF</button>
+    </div>
+    <p class="note" id="note">Oval: OVATION 1°, interpolated. Altitude: modelled 90–220 km profile, not a 3D observation. Moon/Sun: real geocentric ephemerides (Astronomy Engine, MIT); real-scale distances and sizes (1 unit = 6371 km). Field lines: IGRF-14 (2026). Solar wind veil: potential-flow model, intensity from Kp. Timeline: observed Kp (30 days) and forecast Kp (27 days); past and future scale the oval, they are not historical maps.</p>
+    </div>
+  </div>
+
+  <div id="legend" class="panel">
+    <div class="title">AURORA 3D</div>
+    <div class="bar"></div>
+    <div class="scale"><span>weak</span><span>strong</span></div>
+  </div>
+
+  <div id="hint"><span class="hintMouse">drag to rotate · Shift/right-drag to pan · wheel to zoom · double-click to reset</span><span class="hintTouch">drag to rotate · pinch to zoom · two-finger drag to pan · double-tap to reset</span> · yellow line = Sun · blue = Moon</div>
+
+  <div id="timeline" class="panel">
+    <div class="top">
+      <button id="nowBtn" type="button">ADESSO</button>
+      <div class="trackWrap">
+        <input id="timeSlider" type="range" min="0" max="100" step="1" value="0">
+        <div id="nowMarker"></div>
+      </div>
+    </div>
+    <div class="labels"><span id="tStart">—</span><span id="tEnd">—</span></div>
+    <div class="caption">
+      <span>Kp <b id="captionKp">—</b> · <span id="rangeInfo">—</span></span>
+      <span class="legendText">green = observed Kp · purple = forecast Kp · 1 min step</span>
+    </div>
+  </div>
+
+  <button id="hudTab" class="edgeTab" type="button" hidden aria-controls="hud" aria-expanded="false">AURORA ›</button>
+  <button id="timelineTab" class="edgeTab" type="button" hidden aria-controls="timeline" aria-expanded="false">▲ TIME</button>
+  <button id="fsBtn" type="button" hidden aria-pressed="false" aria-label="Full screen" title="Full screen">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 6V1h5M12 1h5v5M17 12v5h-5M6 17H1v-5"/></svg>
+  </button>
+  <div id="rotateHint" hidden>↻ Turn the phone for the full view <button type="button" aria-label="Dismiss">×</button></div>
+
+  <div id="overlay">
+    <div class="box">
+      <div class="spinner"></div>
+      <h2>LOADING DATA</h2>
+      <p id="overlayText">Loading OVATION, Kp index and Earth topology…</p>
+      <button id="startBtn" type="button" hidden>START</button>
+    </div>
+  </div>
+
+  <script src="./vendor/astronomy.browser.min.js"></script>
+  <script type="module">
+    const OVATION_URL = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
+    const KP_URL = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json";
+    const LAND_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json";
+    const LAND_FALLBACK_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json";
+    const DGD_URL = "https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt";
+    const OUTLOOK_URL = "https://services.swpc.noaa.gov/text/27-day-outlook.txt";
+    const EARTH_TEX_W = 4096;
+    const EARTH_TEX_H = 2048;
+    const EARTH_RADIUS_KM = 6371;
+    const MOON_RADIUS_KM = 1737.4;
+    const SUN_RADIUS_KM = 695700;
+    const FOV_Y = 45 * Math.PI / 180;
+    const MIN_DISTANCE = 1.08;
+    const MAX_DISTANCE = 60000;
+    const AURORA_LAYERS = [
+      { altKm: 90,  alpha: 0.10, tint: [0.32, 1.00, 0.58] },
+      { altKm: 100, alpha: 0.20, tint: [0.45, 1.00, 0.52] },
+      { altKm: 112, alpha: 0.26, tint: [0.70, 1.00, 0.45] },
+      { altKm: 125, alpha: 0.20, tint: [1.00, 0.92, 0.42] },
+      { altKm: 145, alpha: 0.13, tint: [1.00, 0.62, 0.35] },
+      { altKm: 175, alpha: 0.08, tint: [1.00, 0.35, 0.48] },
+      { altKm: 220, alpha: 0.05, tint: [0.95, 0.25, 0.60] }
+    ];
+
+    const canvas = document.getElementById("gl");
+    const overlay = document.getElementById("overlay");
+    const overlayText = document.getElementById("overlayText");
+    const timeLabel = document.getElementById("timeLabel");
+    const kpLabel = document.getElementById("kpLabel");
+    const refLabel = document.getElementById("refLabel");
+    const statusEl = document.getElementById("status");
+    const noteEl = document.getElementById("note");
+    const slider = document.getElementById("timeSlider");
+    const tStart = document.getElementById("tStart");
+    const tEnd = document.getElementById("tEnd");
+    const captionKp = document.getElementById("captionKp");
+    const nowBtn = document.getElementById("nowBtn");
+    const auraLabel = document.getElementById("auraLabel");
+    const gaugeFill = document.getElementById("gaugeFill");
+    const rangeInfo = document.getElementById("rangeInfo");
+    const nowMarker = document.getElementById("nowMarker");
+    const moonLabel = document.getElementById("moonLabel");
+    const sunLabel = document.getElementById("sunLabel");
+    const focusMoon = document.getElementById("focusMoon");
+    const focusSun = document.getElementById("focusSun");
+    const fieldBtn = document.getElementById("fieldBtn");
+    const windBtn = document.getElementById("windBtn");
+    const lockBtn = document.getElementById("lockBtn");
+    const hud = document.getElementById("hud");
+    const hudToggle = document.getElementById("hudToggle");
+    const timelineEl = document.getElementById("timeline");
+    const hudTab = document.getElementById("hudTab");
+    const timelineTab = document.getElementById("timelineTab");
+    const fsBtn = document.getElementById("fsBtn");
+    const rotateHint = document.getElementById("rotateHint");
+    const startBtn = document.getElementById("startBtn");
+    const TOUCH_FIRST = matchMedia("(pointer: coarse)").matches;
+
+    // Per-viewer UI preferences. Storage can be unavailable (private mode), so it is best-effort.
+    function loadPref(key) {
+      try { return localStorage.getItem("aurora." + key); } catch (_) { return null; }
+    }
+    function savePref(key, value) {
+      try { localStorage.setItem("aurora." + key, value); } catch (_) { /* ignore */ }
+    }
+
+    // Compact (phone) layout: the HUD shows a summary and expands on demand.
+    function setHudExpanded(expanded) {
+      hud.classList.toggle("expanded", expanded);
+      hudToggle.setAttribute("aria-expanded", String(expanded));
+      hudToggle.textContent = expanded ? "LESS" : "MORE";
+    }
+    hudToggle.addEventListener("click", () => setHudExpanded(!hud.classList.contains("expanded")));
+
+    // Expose the timeline height to CSS so the expanded HUD never runs underneath it.
+    function syncTimelineHeight() {
+      const tucked = timelineEl.classList.contains("tucked");
+      const height = tucked ? 0 : Math.ceil(timelineEl.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--timeline-h", `${height}px`);
+    }
+    if ("ResizeObserver" in window) new ResizeObserver(syncTimelineHeight).observe(timelineEl);
+    window.addEventListener("resize", syncTimelineHeight);
+    syncTimelineHeight();
+
+    // Swipe a panel toward its screen edge to tuck it away; a tab on that edge brings it back.
+    // axis/sign give the tuck direction: HUD = left (x, -1), timeline = down (y, +1).
+    function makeTuckable(panel, tab, { axis, sign, key }) {
+      const THRESHOLD = 50;
+      const prop = axis === "x" ? "--drag-x" : "--drag-y";
+      let drag = null;
+
+      function setTucked(tucked, persist = true) {
+        panel.classList.toggle("tucked", tucked);
+        panel.setAttribute("aria-hidden", String(tucked));
+        panel.inert = tucked;
+        tab.hidden = !tucked;
+        if (persist) savePref(key, tucked ? "1" : "0");
+        syncTimelineHeight();
+      }
+
+      panel.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || event.target.closest("button, input, a")) return;
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY, active: false };
+      });
+      panel.addEventListener("pointermove", (event) => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const along = axis === "x" ? event.clientX - drag.x : event.clientY - drag.y;
+        const across = axis === "x" ? event.clientY - drag.y : event.clientX - drag.x;
+        if (!drag.active) {
+          if (Math.abs(along) < 8 && Math.abs(across) < 8) return;
+          if (Math.abs(across) > Math.abs(along)) { drag = null; return; } // other direction: let it scroll
+          drag.active = true;
+          panel.classList.add("dragging");
+          try { panel.setPointerCapture(event.pointerId); } catch (_) { /* pointer already gone */ }
+          window.getSelection()?.removeAllRanges();
+        }
+        // Follow the finger toward the edge; resist movement the other way.
+        const offset = along * sign > 0 ? along : along * 0.15;
+        panel.style.setProperty(prop, `${offset}px`);
+      });
+      function endDrag(event) {
+        if (!drag || event.pointerId !== drag.id) return;
+        const along = axis === "x" ? event.clientX - drag.x : event.clientY - drag.y;
+        const wasActive = drag.active;
+        drag = null;
+        panel.classList.remove("dragging");
+        panel.style.removeProperty(prop);
+        if (wasActive && event.type === "pointerup" && along * sign > THRESHOLD) setTucked(true);
+      }
+      panel.addEventListener("pointerup", endDrag);
+      panel.addEventListener("pointercancel", endDrag);
+
+      // Tapping the tab, or dragging it and letting go, brings the panel back.
+      tab.addEventListener("pointerdown", (event) => {
+        try { tab.setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+      });
+      tab.addEventListener("click", () => setTucked(false));
+
+      setTucked(loadPref(key) === "1", false);
+    }
+    makeTuckable(hud, hudTab, { axis: "x", sign: -1, key: "hudTucked" });
+    makeTuckable(timelineEl, timelineTab, { axis: "y", sign: 1, key: "timelineTucked" });
+
+    // Full screen + landscape lock. Browsers only allow these from a user gesture, and
+    // iPhone Safari supports neither for web pages, so every step is best-effort.
+    const rootEl = document.documentElement;
+    const canFullscreen = !!(rootEl.requestFullscreen || rootEl.webkitRequestFullscreen);
+    rootEl.classList.toggle("can-fs", canFullscreen);
+    fsBtn.hidden = !canFullscreen;
+    const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+    async function enterImmersive() {
+      try {
+        if (!fullscreenElement()) {
+          if (rootEl.requestFullscreen) await rootEl.requestFullscreen({ navigationUI: "hide" });
+          else rootEl.webkitRequestFullscreen();
+        }
+      } catch (_) { /* refused by the browser */ }
+      try {
+        if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape");
+      } catch (_) { /* orientation lock unsupported here (desktop, iOS) */ }
+    }
+    function exitImmersive() {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) Promise.resolve(exit.call(document)).catch(() => {});
+    }
+    fsBtn.addEventListener("click", () => (fullscreenElement() ? exitImmersive() : enterImmersive()));
+    for (const type of ["fullscreenchange", "webkitfullscreenchange"]) {
+      document.addEventListener(type, () => fsBtn.setAttribute("aria-pressed", String(!!fullscreenElement())));
+    }
+
+    // Phones: once the data is loaded, a START tap opens the globe full screen in landscape.
+    function showStartScreen() {
+      overlay.classList.add("ready");
+      overlay.querySelector("h2").textContent = "READY";
+      overlayText.textContent = canFullscreen
+        ? "Tap START to open the globe full screen in landscape."
+        : "Tap START, then turn the phone sideways for the full view.";
+      startBtn.hidden = false;
+      startBtn.focus();
+    }
+    startBtn.addEventListener("click", () => {
+      startBtn.hidden = true;
+      overlay.classList.add("hidden");
+      enterImmersive();
+    });
+
+    // Portrait phones: a dismissible hint to turn the phone (CSS shows it only in portrait).
+    rotateHint.hidden = !TOUCH_FIRST || loadPref("rotateHintDismissed") === "1";
+    rotateHint.querySelector("button").addEventListener("click", () => {
+      rotateHint.hidden = true;
+      savePref("rotateHintDismissed", "1");
+    });
+
+    function fail(message) {
+      startBtn.hidden = true;
+      overlay.classList.remove("hidden", "ready");
+      overlay.classList.add("error");
+      overlayText.textContent = message;
+      overlayText.className = "error";
+      console.error(message);
+    }
+
+    function formatUtc(ms) {
+      const d = new Date(ms);
+      const iso = d.toISOString();
+      return iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC";
+    }
+
+    function formatShort(ms) {
+      const d = new Date(ms);
+      const iso = d.toISOString();
+      return iso.slice(5, 10) + " " + iso.slice(11, 16);
+    }
+
+    function formatKm(value) {
+      return Math.round(value).toLocaleString("it-IT");
+    }
+
+    function equatorialDirection(vector) {
+      const distance = Math.hypot(vector.x, vector.y, vector.z);
+      const ra = Math.atan2(vector.y, vector.x);
+      const dec = Math.asin(Math.max(-1, Math.min(1, vector.z / distance)));
+      const c = Math.cos(dec);
+      return {
+        x: Math.sin(ra) * c,
+        y: Math.sin(dec),
+        z: Math.cos(ra) * c,
+        distanceKm: distance * Astronomy.KM_PER_AU,
+        ra,
+        dec
+      };
+    }
+
+    function computeBodyState(ms) {
+      if (typeof Astronomy === "undefined") return null;
+      const date = new Date(ms);
+      const sun = equatorialDirection(Astronomy.GeoVector(Astronomy.Body.Sun, date, true));
+      const moon = equatorialDirection(Astronomy.GeoVector(Astronomy.Body.Moon, date, true));
+
+      sun.radiusKm = SUN_RADIUS_KM;
+      moon.radiusKm = MOON_RADIUS_KM;
+      sun.angularRadius = Math.asin(Math.min(1, SUN_RADIUS_KM / sun.distanceKm));
+      moon.angularRadius = Math.asin(Math.min(1, MOON_RADIUS_KM / moon.distanceKm));
+      sun.visualDistance = sun.distanceKm / EARTH_RADIUS_KM;
+      moon.visualDistance = moon.distanceKm / EARTH_RADIUS_KM;
+      sun.visualRadius = SUN_RADIUS_KM / EARTH_RADIUS_KM;
+      moon.visualRadius = MOON_RADIUS_KM / EARTH_RADIUS_KM;
+
+      const phaseCos = moon.x * sun.x + moon.y * sun.y + moon.z * sun.z;
+      const illumination = Math.max(0, Math.min(1, (1 - phaseCos) * 0.5));
+      const gmst = Astronomy.SiderealTime(date) * 15 * Math.PI / 180;
+      return { sun, moon, illumination, gmst };
+    }
+
+    function activityColor(peak) {
+      const t = Math.min(1, Math.max(0, (peak - 6) / 22));
+      let r, g, b;
+      if (t < 0.35) { const f = t / 0.35; r = 40 + 80 * f; g = 255; b = 130 - 10 * f; }
+      else if (t < 0.6) { const f = (t - 0.35) / 0.25; r = 120 + 135 * f; g = 255 - 35 * f; b = 120 - 40 * f; }
+      else if (t < 0.8) { const f = (t - 0.6) / 0.2; r = 255; g = 220 - 100 * f; b = 80 - 20 * f; }
+      else { const f = (t - 0.8) / 0.2; r = 255; g = 120 - 60 * f; b = 60 + 120 * f; }
+      return "rgb(" + Math.round(r) + ", " + Math.round(g) + ", " + Math.round(b) + ")";
+    }
+
+    // -----------------------------------------------------------------------
+    // WebGL
+    // -----------------------------------------------------------------------
+
+    const gl = canvas.getContext("webgl", { antialias: true, alpha: false, depth: true });
+    if (!gl) {
+      fail("WebGL is not available in this browser.");
+      throw new Error("WebGL unavailable");
+    }
+    // Without this the page silently turns into a blank canvas when the GPU drops the context.
+    canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      fail("The graphics context was lost (the GPU ran out of memory or was reset). Reload the page to try again.");
+    });
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error("Shader error: " + gl.getShaderInfoLog(shader));
+      }
+      return shader;
+    }
+
+    function createProgram(vertexSource, fragmentSource, attributeNames, uniformNames) {
+      const program = gl.createProgram();
+      gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexSource));
+      gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSource));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error("Program link error: " + gl.getProgramInfoLog(program));
+      }
+      const attributes = {};
+      for (const name of attributeNames) attributes[name] = gl.getAttribLocation(program, name);
+      const uniforms = {};
+      for (const name of uniformNames) uniforms[name] = gl.getUniformLocation(program, name);
+      return { program, attributes, uniforms };
+    }
+
+    const earthProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      attribute vec2 aUV;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      varying vec2 vUV;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec4 world = uModel * vec4(aPosition, 1.0);
+        vWorld = world.xyz;
+        vNormal = mat3(uModel) * aNormal;
+        vUV = aUV;
+        gl_Position = uProjection * uView * world;
+      }
+      `,
+      `
+      precision mediump float;
+      uniform sampler2D uEarth;
+      uniform vec3 uCamera;
+      uniform vec3 uSunDir;
+      varying vec2 vUV;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec3 base = texture2D(uEarth, vUV).rgb;
+        vec3 n = normalize(vNormal);
+        vec3 light = normalize(uSunDir);
+        float diff = max(dot(n, light), 0.0);
+        vec3 color = base * (0.42 + 0.9 * diff);
+        vec3 viewDir = normalize(uCamera - vWorld);
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+        color += vec3(0.10, 0.26, 0.54) * rim;
+        gl_FragColor = vec4(color, 1.0);
+      }
+      `,
+      ["aPosition", "aNormal", "aUV"],
+      ["uModel", "uView", "uProjection", "uEarth", "uCamera", "uSunDir"]
+    );
+
+    const auroraProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      attribute vec2 aUV;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      uniform float uScale;
+      varying vec2 vUV;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec4 world = uModel * vec4(aPosition * uScale, 1.0);
+        vWorld = world.xyz;
+        vNormal = mat3(uModel) * aPosition;
+        vUV = aUV;
+        gl_Position = uProjection * uView * world;
+      }
+      `,
+      `
+      precision mediump float;
+      uniform sampler2D uAurora;
+      uniform vec2 uTexel;
+      uniform vec3 uCamera;
+      uniform float uLayerAlpha;
+      uniform vec3 uTint;
+      varying vec2 vUV;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec3 n = normalize(vNormal);
+        vec3 viewDir = normalize(uCamera - vWorld);
+        if (dot(n, viewDir) < 0.0) discard;
+        vec4 c = texture2D(uAurora, vUV);
+        vec2 ox = vec2(uTexel.x * 2.0, 0.0);
+        vec2 oy = vec2(0.0, uTexel.y * 2.0);
+        vec4 g = texture2D(uAurora, vUV + ox)
+               + texture2D(uAurora, vUV - ox)
+               + texture2D(uAurora, vUV + oy)
+               + texture2D(uAurora, vUV - oy);
+        g *= 0.14;
+        vec3 base = c.rgb * 0.95 + g.rgb;
+        vec3 color = mix(base, uTint, 0.35);
+        gl_FragColor = vec4(color, clamp(c.a * 0.95 + g.a, 0.0, 1.0) * uLayerAlpha);
+      }
+      `,
+      ["aPosition", "aUV"],
+      ["uModel", "uView", "uProjection", "uAurora", "uScale", "uTexel", "uCamera", "uLayerAlpha", "uTint"]
+    );
+
+    const celestialProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      uniform vec3 uCenter;
+      uniform float uRadius;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vWorld = (uModel * vec4(uCenter + aPosition * uRadius, 1.0)).xyz;
+        vNormal = mat3(uModel) * aNormal;
+        gl_Position = uProjection * uView * vec4(vWorld, 1.0);
+      }
+      `,
+      `
+      precision mediump float;
+      uniform vec3 uCamera;
+      uniform vec3 uSunDir;
+      uniform float uSunMode;
+      uniform vec3 uBodyColor;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      void main() {
+        vec3 n = normalize(vNormal);
+        vec3 viewDir = normalize(uCamera - vWorld);
+        if (dot(n, viewDir) < 0.0) discard;
+        if (uSunMode > 0.5) {
+          gl_FragColor = vec4(uBodyColor, 1.0);
+          return;
+        }
+        vec3 light = normalize(uSunDir);
+        float diff = max(dot(n, light), 0.0);
+        vec3 color = uBodyColor * (0.025 + 0.975 * diff);
+        gl_FragColor = vec4(color, 1.0);
+      }
+      `,
+      ["aPosition", "aNormal"],
+      ["uModel", "uView", "uProjection", "uCenter", "uRadius", "uCamera", "uSunDir", "uSunMode", "uBodyColor"]
+    );
+
+    const lineProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      void main() {
+        gl_Position = uProjection * uView * (uModel * vec4(aPosition, 1.0));
+      }
+      `,
+      `
+      precision mediump float;
+      uniform vec4 uColor;
+      void main() {
+        gl_FragColor = uColor;
+      }
+      `,
+      ["aPosition"],
+      ["uModel", "uView", "uProjection", "uColor"]
+    );
+
+    const fieldLineProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      attribute float aIntensity;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      varying float vIntensity;
+      void main() {
+        vec4 world = uModel * vec4(aPosition, 1.0);
+        vWorld = world.xyz;
+        vNormal = mat3(uModel) * aNormal;
+        vIntensity = aIntensity;
+        gl_Position = uProjection * uView * world;
+      }
+      `,
+      `
+      precision mediump float;
+      varying vec3 vNormal;
+      varying vec3 vWorld;
+      varying float vIntensity;
+      void main() {
+        vec3 color = mix(
+          vec3(0.08, 0.28, 0.92),
+          vec3(0.62, 0.94, 1.0),
+          clamp(vIntensity, 0.0, 1.0)
+        );
+        float rim = 0.82 + 0.18 * abs(normalize(vNormal).y);
+        gl_FragColor = vec4(color * rim, 1.0);
+      }
+      `,
+      ["aPosition", "aNormal", "aIntensity"],
+      ["uModel", "uView", "uProjection"]
+    );
+
+    function buildFieldLineMesh(data, radius = 0.003, sides = 6) {
+      const positions = [];
+      const normals = [];
+      const intensities = [];
+      const indices = [];
+      let vertexOffset = 0;
+
+      const cross = (a, b) => [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+      const length = (v) => Math.hypot(v[0], v[1], v[2]);
+      const normalize = (v) => {
+        const l = length(v) || 1;
+        return [v[0] / l, v[1] / l, v[2] / l];
+      };
+
+      for (const line of data.lines) {
+        const points = line.points;
+        if (!Array.isArray(points) || points.length < 2) continue;
+        const count = points.length;
+        for (let i = 0; i < count; i++) {
+          const prev = points[Math.max(0, i - 1)];
+          const next = points[Math.min(count - 1, i + 1)];
+          let tangent = normalize([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]);
+          if (!Number.isFinite(tangent[0]) || length(tangent) < 1e-6) tangent = [0, 1, 0];
+          const ref = Math.abs(tangent[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+          const side = normalize(cross(tangent, ref));
+          const normal = normalize(cross(side, tangent));
+          const strength = Math.min(1, Math.max(0, Math.log10(Math.max(1, line.b && line.b[i] || 1)) / 5));
+          for (let k = 0; k < sides; k++) {
+            const angle = (k / sides) * Math.PI * 2;
+            const ca = Math.cos(angle);
+            const sa = Math.sin(angle);
+            const nx = side[0] * ca + normal[0] * sa;
+            const ny = side[1] * ca + normal[1] * sa;
+            const nz = side[2] * ca + normal[2] * sa;
+            positions.push(points[i][0] + nx * radius, points[i][1] + ny * radius, points[i][2] + nz * radius);
+            normals.push(nx, ny, nz);
+            intensities.push(strength);
+          }
+          if (i > 0) {
+            const a0 = vertexOffset + (i - 1) * sides;
+            const b0 = vertexOffset + i * sides;
+            for (let k = 0; k < sides; k++) {
+              const k1 = (k + 1) % sides;
+              indices.push(a0 + k, a0 + k1, b0 + k1, a0 + k, b0 + k1, b0 + k);
+            }
+          }
+        }
+        vertexOffset += count * sides;
+      }
+
+      return {
+        positions: new Float32Array(positions),
+        normals: new Float32Array(normals),
+        intensities: new Float32Array(intensities),
+        indices: new Uint16Array(indices)
+      };
+    }
+
+    const windProgram = createProgram(
+      `
+      attribute vec3 aPosition;
+      attribute float aFlow;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      uniform mat4 uProjection;
+      uniform vec3 uRight;
+      uniform vec3 uUp;
+      uniform vec3 uFlowDir;
+      varying float vFlow;
+      void main() {
+        vec3 local = uRight * aPosition.x + uUp * aPosition.y + uFlowDir * aPosition.z;
+        gl_Position = uProjection * uView * (uModel * vec4(local, 1.0));
+        vFlow = aFlow;
+      }
+      `,
+      `
+      precision mediump float;
+      uniform vec3 uColor;
+      uniform float uAlpha;
+      uniform float uPhase;
+      varying float vFlow;
+      void main() {
+        float dash = 0.62 + 0.38 * sin(vFlow * 2.2 - uPhase);
+        gl_FragColor = vec4(uColor, uAlpha * dash);
+      }
+      `,
+      ["aPosition", "aFlow"],
+      ["uModel", "uView", "uProjection", "uRight", "uUp", "uFlowDir", "uColor", "uAlpha", "uPhase"]
+    );
+
+    function buildSolarWindMesh(radius = 0.0052, sides = 6, obstacle = 2.6) {
+      const positions = [];
+      const flows = [];
+      const indices = [];
+      const a3 = obstacle * obstacle * obstacle;
+      let vertexOffset = 0;
+
+      const potential = (p) => {
+        const x = p[0], y = p[1], z = p[2];
+        const r2 = x * x + y * y + z * z;
+        const r = Math.sqrt(r2);
+        if (r < obstacle * 1.002) return null;
+        const r3 = r2 * r;
+        const r5 = r3 * r2;
+        const denom = 2 * r5;
+        return [
+          -3 * a3 * x * z / denom,
+          -3 * a3 * y * z / denom,
+          1 + a3 / (2 * r3) - 3 * a3 * z * z / denom
+        ];
+      };
+
+      const trace = (b, azimuth) => {
+        const ca = Math.cos(azimuth);
+        const sa = Math.sin(azimuth);
+        let p = [b * ca, b * sa, -6.5];
+        const points = [p];
+        for (let step = 0; step < 360; step++) {
+          const v = potential(p);
+          if (!v) break;
+          const speed = Math.hypot(v[0], v[1], v[2]);
+          if (speed < 1e-6) break;
+          p = [
+            p[0] + v[0] / speed * 0.06,
+            p[1] + v[1] / speed * 0.06,
+            p[2] + v[2] / speed * 0.06
+          ];
+          points.push(p);
+          if (p[2] > 6.5) break;
+        }
+        return points;
+      };
+
+      const thin = (points, maxPoints = 150) => {
+        if (points.length <= maxPoints) return points;
+        const out = [];
+        for (let i = 0; i < maxPoints; i++) {
+          const t = i * (points.length - 1) / (maxPoints - 1);
+          const a = Math.floor(t);
+          const b = Math.min(a + 1, points.length - 1);
+          const f = t - a;
+          out.push([
+            points[a][0] * (1 - f) + points[b][0] * f,
+            points[a][1] * (1 - f) + points[b][1] * f,
+            points[a][2] * (1 - f) + points[b][2] * f
+          ]);
+        }
+        return out;
+      };
+
+      const cross = (a, b) => [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+      const normalize = (v) => {
+        const l = Math.hypot(v[0], v[1], v[2]) || 1;
+        return [v[0] / l, v[1] / l, v[2] / l];
+      };
+
+      for (const b of [1.8, 2.8, 3.8]) {
+        for (let az = 0; az < 8; az++) {
+          const points = thin(trace(b, az * Math.PI / 4));
+          if (points.length < 2) continue;
+          let flowCoord = 0;
+          for (let i = 0; i < points.length; i++) {
+            const prev = points[Math.max(0, i - 1)];
+            const next = points[Math.min(points.length - 1, i + 1)];
+            const tangent = normalize([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]);
+            const ref = Math.abs(tangent[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+            const side = normalize(cross(tangent, ref));
+            const normal = normalize(cross(side, tangent));
+            if (i > 0) {
+              flowCoord += Math.hypot(
+                points[i][0] - points[i - 1][0],
+                points[i][1] - points[i - 1][1],
+                points[i][2] - points[i - 1][2]
+              );
+            }
+            for (let k = 0; k < sides; k++) {
+              const angle = (k / sides) * Math.PI * 2;
+              const nx = side[0] * Math.cos(angle) + normal[0] * Math.sin(angle);
+              const ny = side[1] * Math.cos(angle) + normal[1] * Math.sin(angle);
+              const nz = side[2] * Math.cos(angle) + normal[2] * Math.sin(angle);
+              positions.push(points[i][0] + nx * radius, points[i][1] + ny * radius, points[i][2] + nz * radius);
+              flows.push(flowCoord);
+            }
+            if (i > 0) {
+              const a0 = vertexOffset + (i - 1) * sides;
+              const b0 = vertexOffset + i * sides;
+              for (let k = 0; k < sides; k++) {
+                const k1 = (k + 1) % sides;
+                indices.push(a0 + k, a0 + k1, b0 + k1, a0 + k, b0 + k1, b0 + k);
+              }
+            }
+          }
+          vertexOffset += points.length * sides;
+        }
+      }
+
+      return {
+        positions: new Float32Array(positions),
+        flows: new Float32Array(flows),
+        indices: new Uint16Array(indices)
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    // Earth texture from raw Natural Earth topology (TopoJSON)
+    // -----------------------------------------------------------------------
+
+    function decodeArcs(topology) {
+      const transform = topology.transform;
+      return topology.arcs.map((arc) => {
+        let x = 0;
+        let y = 0;
+        return arc.map((point) => {
+          if (transform) {
+            x += point[0];
+            y += point[1];
+            return [
+              x * transform.scale[0] + transform.translate[0],
+              y * transform.scale[1] + transform.translate[1]
+            ];
+          }
+          return [point[0], point[1]];
+        });
+      });
+    }
+
+    function ringPoints(arcs, ids) {
+      const points = [];
+      for (const id of ids) {
+        let arc = arcs[id < 0 ? ~id : id];
+        if (id < 0) arc = arc.slice().reverse();
+        for (let k = points.length ? 1 : 0; k < arc.length; k++) points.push(arc[k]);
+      }
+      return points;
+    }
+
+    function makeFallbackEarthCanvas() {
+      const width = EARTH_TEX_W;
+      const height = EARTH_TEX_H;
+      const c = document.createElement("canvas");
+      c.width = width;
+      c.height = height;
+      const g = c.getContext("2d");
+      const ocean = g.createLinearGradient(0, 0, 0, height);
+      ocean.addColorStop(0, "#0b2138");
+      ocean.addColorStop(0.5, "#061426");
+      ocean.addColorStop(1, "#0b2138");
+      g.fillStyle = ocean;
+      g.fillRect(0, 0, width, height);
+      return c;
+    }
+
+    function makeEarthCanvas(topology) {
+      const width = EARTH_TEX_W;
+      const height = EARTH_TEX_H;
+      const c = document.createElement("canvas");
+      c.width = width;
+      c.height = height;
+      // Rasterize the land polygons on the CPU. On Android Chrome with a Mali GPU,
+      // GPU-rasterizing this large path fill hangs the GPU; the driver resets it a few
+      // seconds later and the WebGL context is lost (blank white canvas).
+      const g = c.getContext("2d", { willReadFrequently: true });
+
+      const ocean = g.createLinearGradient(0, 0, 0, height);
+      ocean.addColorStop(0, "#0a1e34");
+      ocean.addColorStop(0.5, "#061426");
+      ocean.addColorStop(1, "#0a1e34");
+      g.fillStyle = ocean;
+      g.fillRect(0, 0, width, height);
+
+      const arcs = decodeArcs(topology);
+      const toXY = (lon, lat) => [((lon + 180) / 360) * width, ((90 - lat) / 180) * height];
+
+      // Build one path per polygon, unwrapping longitudes across the
+      // antimeridian. Each path is drawn three times (shifted by -width, 0 and
+      // +width) so polygons crossing the dateline do not leave horizontal
+      // closure lines that would appear as concentric rings on the globe.
+      const polygonPaths = [];
+      const geometries = topology.objects.land.geometries;
+      for (const geometry of geometries) {
+        const polygons = geometry.type === "Polygon" ? [geometry.arcs] : geometry.arcs;
+        for (const polygon of polygons) {
+          const path = new Path2D();
+          let outerCenter = 0;
+          let ringIndex = 0;
+          for (const ids of polygon) {
+            const points = ringPoints(arcs, ids);
+            if (points.length < 3) continue;
+
+            const wrapped = [];
+            let prevLon = points[0][0];
+            wrapped.push([prevLon, points[0][1]]);
+            for (let i = 1; i < points.length; i++) {
+              let lon = points[i][0];
+              while (lon - prevLon > 180) lon -= 360;
+              while (lon - prevLon < -180) lon += 360;
+              prevLon = lon;
+              wrapped.push([lon, points[i][1]]);
+            }
+
+            let center = 0;
+            for (const point of wrapped) center += point[0];
+            center /= wrapped.length;
+
+            let shift = 0;
+            if (ringIndex === 0) outerCenter = center;
+            else shift = Math.round((outerCenter - center) / 360) * 360;
+
+            for (let i = 0; i < wrapped.length; i++) {
+              const [x, y] = toXY(wrapped[i][0] + shift, wrapped[i][1]);
+              if (i === 0) path.moveTo(x, y);
+              else path.lineTo(x, y);
+            }
+            path.closePath();
+            ringIndex++;
+          }
+          polygonPaths.push(path);
+        }
+      }
+
+      const ice = g.createLinearGradient(0, 0, 0, height);
+      ice.addColorStop(0, "rgba(220, 240, 255, 0.85)");
+      ice.addColorStop(0.12, "rgba(200, 225, 245, 0)");
+      ice.addColorStop(0.88, "rgba(200, 225, 245, 0)");
+      ice.addColorStop(1, "rgba(225, 242, 255, 0.9)");
+
+      for (const shift of [-width, 0, width]) {
+        g.save();
+        g.translate(shift, 0);
+        g.fillStyle = "#1a3a2a";
+        for (const path of polygonPaths) g.fill(path, "evenodd");
+        g.restore();
+      }
+
+      for (const shift of [-width, 0, width]) {
+        g.save();
+        g.translate(shift, 0);
+        g.fillStyle = ice;
+        for (const path of polygonPaths) {
+          g.save();
+          g.clip(path, "evenodd");
+          g.fillRect(-width, 0, width * 3, height);
+          g.restore();
+        }
+        g.restore();
+      }
+
+      // Polar caps: the equirectangular pole is a singular line, and the
+      // Natural Earth Antarctica polygon does not always cover it. Paint a
+      // smooth cap so the pole does not show a dark pinwheel.
+      const southCap = g.createLinearGradient(0, height * 0.965, 0, height);
+      southCap.addColorStop(0, "rgba(228, 244, 255, 0)");
+      southCap.addColorStop(0.55, "rgba(228, 244, 255, 0.92)");
+      southCap.addColorStop(1, "rgba(240, 250, 255, 1)");
+      g.fillStyle = southCap;
+      g.fillRect(0, height * 0.965, width, height * 0.035);
+
+      // The north pole is ocean here. Keep the top rows uniform so the
+      // converging UVs do not turn a small ice patch into a grey pinwheel.
+      g.fillStyle = "#0a1e34";
+      g.fillRect(0, 0, width, height * 0.012);
+
+      // Coastline stroke omitted on purpose: Natural Earth rings that cross
+      // the antimeridian would be stroked as horizontal lines, which become
+      // concentric rings when mapped onto the globe.
+
+      return c;
+    }
+
+    // -----------------------------------------------------------------------
+    // Data loading
+    // -----------------------------------------------------------------------
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { cache: "no-cache" });
+      if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+      return response.json();
+    }
+
+    async function fetchText(url) {
+      const response = await fetch(url, { cache: "no-cache" });
+      if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+      return response.text();
+    }
+
+    async function main() {
+      const wasmResponse = await fetch("./build/release.wasm");
+      if (!wasmResponse.ok) throw new Error("Unable to load build/release.wasm");
+      const wasm = await WebAssembly.instantiateStreaming(wasmResponse, {
+        env: {
+          abort(msg, file, line, column) {
+            throw new Error("Wasm abort (" + line + ":" + column + ")");
+          },
+          seed() {
+            return Date.now() % 2147483647;
+          }
+        }
+      }).catch(async (error) => {
+        console.warn("instantiateStreaming fallito, uso ArrayBuffer", error);
+        const bytes = await (await fetch("./build/release.wasm")).arrayBuffer();
+        return WebAssembly.instantiate(bytes, {
+          env: {
+            abort() { throw new Error("Wasm abort"); },
+            seed() { return Date.now() % 2147483647; }
+          }
+        });
+      });
+
+      const exports = wasm.instance.exports;
+      const memory = exports.memory;
+      const MAX_KP = exports.maxKpCount();
+
+      const [ovationResult, kpResult, dgdResult, outlookResult, landResult, fieldlineResult] = await Promise.allSettled([
+        fetchJson(OVATION_URL),
+        fetchJson(KP_URL),
+        fetchText(DGD_URL),
+        fetchText(OUTLOOK_URL),
+        fetchJson(LAND_URL).catch((error) => {
+          console.warn("50m topology unavailable; using 110m", error);
+          return fetchJson(LAND_FALLBACK_URL);
+        }),
+        fetchJson("./vendor/fieldlines.json")
+      ]);
+
+      if (ovationResult.status === "rejected") {
+        throw new Error("OVATION data unavailable: " + ovationResult.reason.message);
+      }
+      const ovation = ovationResult.value;
+
+      // --- Kp timeline: 30 days observed + 3-day forecast + 27-day outlook ---
+      const kpMap = new Map();
+
+      function parseDgd(text) {
+        const rows = [];
+        for (const line of text.split("\n")) {
+          const m = line.match(/^\s*(\d{4})\s+(\d{2})\s+(\d{2})\s+(.+)$/);
+          if (!m) continue;
+          const day = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+          const parts = m[4].trim().split(/\s+/);
+          const planetary = parts.slice(-8).map(Number);
+          for (let i = 0; i < planetary.length; i++) {
+            const kp = planetary[i];
+            if (Number.isFinite(kp) && kp >= 0) rows.push({ ts: day + i * 3 * 3600000, kp, observed: true });
+          }
+        }
+        return rows;
+      }
+
+      function parseOutlook(text) {
+        const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+        const rows = [];
+        for (const line of text.split("\n")) {
+          const m = line.match(/^\s*(\d{4})\s+([A-Z][a-z]{2})\s+(\d{2})\s+(\d+)\s+(\d+)\s+(\d+)\s*$/);
+          if (!m || months[m[2]] === undefined) continue;
+          const ts = Date.UTC(Number(m[1]), months[m[2]], Number(m[3]), 12);
+          const kp = Number(m[6]);
+          if (Number.isFinite(kp)) rows.push({ ts, kp, observed: false });
+        }
+        return rows;
+      }
+
+      let lastForecastTs = 0;
+      if (kpResult.status === "fulfilled" && Array.isArray(kpResult.value)) {
+        for (const row of kpResult.value) {
+          if (!row || !row.time_tag) continue;
+          const ts = Date.parse(row.time_tag + "Z");
+          const kp = Number(row.kp);
+          if (!Number.isFinite(ts) || !Number.isFinite(kp)) continue;
+          kpMap.set(ts, { ts, kp, observed: row.observed === "observed" });
+          lastForecastTs = Math.max(lastForecastTs, ts);
+        }
+      }
+      if (dgdResult.status === "fulfilled") {
+        try {
+          for (const row of parseDgd(dgdResult.value)) if (!kpMap.has(row.ts)) kpMap.set(row.ts, row);
+        } catch (error) {
+          console.warn("Historical Kp unavailable", error);
+        }
+      }
+      if (outlookResult.status === "fulfilled") {
+        try {
+          for (const row of parseOutlook(outlookResult.value)) {
+            if (row.ts > lastForecastTs && !kpMap.has(row.ts)) kpMap.set(row.ts, row);
+          }
+        } catch (error) {
+          console.warn("27-day outlook unavailable", error);
+        }
+      }
+
+      let kpRows = [...kpMap.values()].sort((a, b) => a.ts - b.ts);
+      if (kpRows.length < 2) {
+        const now = Date.now();
+        const H = 3600000;
+        kpRows = [
+          { ts: now - 12 * H, kp: 3, observed: true },
+          { ts: now, kp: 3, observed: true },
+          { ts: now + 12 * H, kp: 3, observed: false }
+        ];
+      }
+
+      let lastObservedMs = -Infinity;
+      for (const row of kpRows) if (row.observed) lastObservedMs = Math.max(lastObservedMs, row.ts);
+      if (!Number.isFinite(lastObservedMs)) lastObservedMs = kpRows[0].ts;
+
+      const kpTimes = kpRows.map((r) => r.ts);
+      const kpValues = kpRows.map((r) => r.kp);
+
+      const timesView = new Float64Array(memory.buffer, exports.kpTimesPtr(), MAX_KP);
+      const valuesView = new Float64Array(memory.buffer, exports.kpValuesPtr(), MAX_KP);
+      const count = Math.min(kpTimes.length, MAX_KP);
+      for (let i = 0; i < count; i++) {
+        timesView[i] = kpTimes[i];
+        valuesView[i] = kpValues[i];
+      }
+      exports.setKpCount(count);
+
+      // OVATION grid -> wasm
+      const gridW = exports.auroraWidth();
+      const gridH = exports.auroraHeight();
+      const gridView = new Float32Array(memory.buffer, exports.auroraGridPtr(), gridW * gridH);
+      gridView.fill(0);
+      for (const point of ovation.coordinates) {
+        const lon = point[0] | 0;
+        const lat = point[1] | 0;
+        const probability = Number(point[2]);
+        if (lon >= 0 && lon < gridW && lat >= -90 && lat <= 90 && Number.isFinite(probability)) {
+          gridView[lon * gridH + (lat + 90)] = probability;
+        }
+      }
+      exports.smoothAuroraGrid();
+
+      const forecastMs = Date.parse(ovation["Forecast Time"]);
+      const referenceKp = exports.kpAtTime(Number.isFinite(forecastMs) ? forecastMs : kpTimes[0]);
+      exports.setReferenceKp(referenceKp);
+
+      const startMs = kpTimes[0];
+      const endMs = kpTimes[count - 1];
+      const nowMs = Date.now();
+      const defaultMs = Math.min(Math.max(Number.isFinite(forecastMs) ? forecastMs : nowMs, startMs), endMs);
+
+      // Sphere buffers
+      exports.buildSphere(1.0);
+      const vertexCount = exports.vertexCount();
+      const indexCount = exports.indexCount();
+
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(memory.buffer, exports.positionsPtr(), vertexCount * 3), gl.STATIC_DRAW);
+
+      const normalBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(memory.buffer, exports.normalsPtr(), vertexCount * 3), gl.STATIC_DRAW);
+
+      const uvBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(memory.buffer, exports.uvsPtr(), vertexCount * 2), gl.STATIC_DRAW);
+
+      const indexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(memory.buffer, exports.indicesPtr(), indexCount), gl.STATIC_DRAW);
+
+      // Two straight links: Sun -> Earth and Moon -> Earth. Vertices are in
+      // the celestial frame, so they follow the bodies as time changes.
+      const linePositions = new Float32Array(12);
+      const lineBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.DYNAMIC_DRAW);
+
+      // IGRF-14 field lines, rendered as thin tubes in the Earth-fixed frame.
+      let fieldLineReady = false;
+      let fieldLinesEnabled = true;
+      let fieldLineIndexCount = 0;
+      let fieldLinePositionBuffer = null;
+      let fieldLineNormalBuffer = null;
+      let fieldLineIntensityBuffer = null;
+      let fieldLineIndexBuffer = null;
+      if (fieldlineResult.status === "fulfilled") {
+        try {
+          const mesh = buildFieldLineMesh(fieldlineResult.value);
+          fieldLineIndexCount = mesh.indices.length;
+          if (fieldLineIndexCount > 0) {
+            fieldLinePositionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, fieldLinePositionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
+            fieldLineNormalBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, fieldLineNormalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
+            fieldLineIntensityBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, fieldLineIntensityBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, mesh.intensities, gl.STATIC_DRAW);
+            fieldLineIndexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, fieldLineIndexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+            fieldLineReady = true;
+          }
+        } catch (error) {
+          console.warn("Field lines not built", error);
+        }
+      } else {
+        console.warn("IGRF field lines unavailable", fieldlineResult.reason);
+      }
+
+      function setFieldLinesEnabled(enabled) {
+        fieldLinesEnabled = enabled;
+        fieldBtn.textContent = enabled ? "FIELD ON" : "FIELD OFF";
+        fieldBtn.classList.toggle("off", !enabled);
+        fieldBtn.setAttribute("aria-pressed", String(enabled));
+      }
+
+      // Solar-wind veil: translucent tubes following a potential flow around
+      // a magnetopause-sized obstacle. It is an illustrative model driven by
+      // the Kp timeline, not an MHD volume.
+      let windReady = false;
+      let windEnabled = true;
+      let earthLocked = false;
+      let windIndexCount = 0;
+      let windAlpha = 0.20;
+      let windPhase = 0;
+      let windPositionBuffer = null;
+      let windFlowBuffer = null;
+      let windIndexBuffer = null;
+      const windRight = new Float32Array([1, 0, 0]);
+      const windUp = new Float32Array([0, 1, 0]);
+      const windFlowDir = new Float32Array([0, 0, 1]);
+      try {
+        const mesh = buildSolarWindMesh();
+        windIndexCount = mesh.indices.length;
+        if (windIndexCount > 0) {
+          windPositionBuffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, windPositionBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
+          windFlowBuffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, windFlowBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, mesh.flows, gl.STATIC_DRAW);
+          windIndexBuffer = gl.createBuffer();
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, windIndexBuffer);
+          gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+          windReady = true;
+        }
+      } catch (error) {
+        console.warn("Solar wind veil not built", error);
+      }
+
+      function setWindEnabled(enabled) {
+        windEnabled = enabled;
+        windBtn.textContent = enabled ? "WIND ON" : "WIND OFF";
+        windBtn.classList.toggle("off", !enabled);
+        windBtn.setAttribute("aria-pressed", String(enabled));
+      }
+
+      function setEarthLocked(enabled) {
+        earthLocked = enabled;
+        exports.setEarthLock(enabled ? 1 : 0);
+        lockBtn.textContent = enabled ? "EARTH LOCK: ON" : "EARTH LOCK: OFF";
+        lockBtn.classList.toggle("locked", enabled);
+        lockBtn.setAttribute("aria-pressed", String(enabled));
+      }
+
+      // Earth texture
+      let earthCanvas;
+      if (landResult.status === "fulfilled") {
+        try {
+          earthCanvas = makeEarthCanvas(landResult.value);
+        } catch (error) {
+          console.warn("Topology not drawn; using simplified map", error);
+          earthCanvas = makeFallbackEarthCanvas();
+          noteEl.textContent = "Topology unavailable: simplified map. OVATION pattern and Kp remain active.";
+        }
+      } else {
+        earthCanvas = makeFallbackEarthCanvas();
+        noteEl.textContent = "Topology unavailable: simplified map. OVATION pattern and Kp remain active.";
+      }
+
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+      const earthTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, earthTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, earthCanvas);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      // The 2D source canvas is no longer needed; release its backing store.
+      earthCanvas.width = 0;
+      earthCanvas.height = 0;
+      earthCanvas = null;
+
+      // Aurora texture
+      const auroraW = exports.auroraTextureWidth();
+      const auroraH = exports.auroraTextureHeight();
+      const auroraView = new Uint8Array(memory.buffer, exports.auroraTexturePtr(), auroraW * auroraH * 4);
+
+      const auroraTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, auroraTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      function uploadAurora() {
+        gl.bindTexture(gl.TEXTURE_2D, auroraTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, auroraW, auroraH, 0, gl.RGBA, gl.UNSIGNED_BYTE, auroraView);
+      }
+
+      // ---------------------------------------------------------------------
+      // Sun / Moon ephemeris
+      // ---------------------------------------------------------------------
+
+      let bodyState = null;
+
+      function updateBodies(ms) {
+        try {
+          bodyState = computeBodyState(ms);
+          if (!bodyState) throw new Error("Astronomy Engine unavailable");
+          exports.setSpin(bodyState.gmst);
+
+          const { sun, moon, illumination } = bodyState;
+          moonLabel.textContent =
+            formatKm(moon.distanceKm) + " km · ⌀" + formatKm(moon.radiusKm * 2) +
+            " km · " + Math.round(illumination * 100) + "%";
+          sunLabel.textContent =
+            formatKm(sun.distanceKm) + " km · ⌀" + formatKm(sun.radiusKm * 2) + " km";
+          const deg = 180 / Math.PI;
+          const formatRa = (ra) => (((ra * deg) % 360) + 360) % 360;
+          moonLabel.title = "RA " + formatRa(moon.ra).toFixed(1) + "° · Dec " + (moon.dec * deg).toFixed(1) + "°";
+          sunLabel.title = "RA " + formatRa(sun.ra).toFixed(1) + "° · Dec " + (sun.dec * deg).toFixed(1) + "°";
+
+          linePositions[0] = 0; linePositions[1] = 0; linePositions[2] = 0;
+          linePositions[3] = sun.x * sun.visualDistance;
+          linePositions[4] = sun.y * sun.visualDistance;
+          linePositions[5] = sun.z * sun.visualDistance;
+          linePositions[6] = 0; linePositions[7] = 0; linePositions[8] = 0;
+          linePositions[9] = moon.x * moon.visualDistance;
+          linePositions[10] = moon.y * moon.visualDistance;
+          linePositions[11] = moon.z * moon.visualDistance;
+          gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.DYNAMIC_DRAW);
+        } catch (error) {
+          console.warn("Sun/Moon ephemerides unavailable", error);
+          bodyState = null;
+          exports.setSpin(0);
+          moonLabel.textContent = "—";
+          sunLabel.textContent = "—";
+          linePositions.fill(0);
+          gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, linePositions, gl.DYNAMIC_DRAW);
+        }
+      }
+
+      function updateSolarWind(ms) {
+        const kp = exports.kpAtTime(ms);
+        windAlpha = Math.min(0.32, 0.09 + Math.max(0, kp) * 0.024);
+        windPhase = (ms / 60000) * 0.28;
+
+        let fx = -1, fy = 0, fz = 0;
+        const sun = bodyState && bodyState.sun;
+        if (sun) { fx = -sun.x; fy = -sun.y; fz = -sun.z; }
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        fx /= fl; fy /= fl; fz /= fl;
+
+        // right = normalize(worldUp x flow), up = flow x right
+        let rx = fz, ry = 0, rz = -fx;
+        const rl = Math.hypot(rx, ry, rz);
+        if (rl < 1e-5) { rx = 1; ry = 0; rz = 0; }
+        else { rx /= rl; ry /= rl; rz /= rl; }
+        const ux = fy * rz - fz * ry;
+        const uy = fz * rx - fx * rz;
+        const uz = fx * ry - fy * rx;
+
+        windFlowDir[0] = fx; windFlowDir[1] = fy; windFlowDir[2] = fz;
+        windRight[0] = rx; windRight[1] = ry; windRight[2] = rz;
+        windUp[0] = ux; windUp[1] = uy; windUp[2] = uz;
+      }
+
+      function focusBody(kind) {
+        if (!bodyState) return;
+        const body = kind === "moon" ? bodyState.moon : bodyState.sun;
+        const radial = Math.hypot(body.x, body.z);
+        if (radial < 1e-6) return;
+
+        // Put the body beside the Earth rather than directly behind it.
+        const targetX = kind === "moon" ? -0.35 : 0.35;
+        const targetY = -0.05;
+        const targetZ = -0.83;
+        const targetNorm = Math.hypot(targetX, targetY, targetZ);
+        const tx = targetX / targetNorm;
+        const ty = targetY / targetNorm;
+        const tz = targetZ / targetNorm;
+        const ratio = tx / radial;
+        if (Math.abs(ratio) > 0.999) return;
+
+        const phi = Math.atan2(body.z, body.x);
+        const nextYaw = phi + Math.acos(Math.max(-1, Math.min(1, ratio)));
+        const b = -Math.sin(nextYaw) * body.x + Math.cos(nextYaw) * body.z;
+        const sourceAngle = Math.atan2(b, body.y);
+        const targetAngle = Math.atan2(tz, ty);
+        const nextPitch = targetAngle - sourceAngle;
+
+        yaw = nextYaw;
+        pitch = nextPitch;
+        distance = 5.5;
+        panX = 0;
+        panY = 0;
+        exports.setRotation(yaw, pitch);
+        exports.setZoom(distance);
+        exports.setPan(0, 0);
+      }
+
+      // ---------------------------------------------------------------------
+      // Time range + HUD
+      // ---------------------------------------------------------------------
+
+      const rangeMs = endMs - startMs;
+      const rangeMinutes = Math.max(1, Math.round(rangeMs / 60000));
+      slider.min = "0";
+      slider.max = String(rangeMinutes);
+      slider.step = "1";
+      tStart.textContent = formatShort(startMs);
+      tEnd.textContent = formatShort(endMs);
+
+      const observedFraction = rangeMs > 0 ? Math.max(0, Math.min(1, (lastObservedMs - startMs) / rangeMs)) : 1;
+      document.documentElement.style.setProperty("--now-split", (observedFraction * 100).toFixed(2) + "%");
+
+      const nowFraction = rangeMs > 0 ? Math.max(0, Math.min(1, (Date.now() - startMs) / rangeMs)) : 1;
+      nowMarker.style.left = (nowFraction * 100).toFixed(2) + "%";
+      const pastDays = Math.max(1, Math.round((lastObservedMs - startMs) / 86400000));
+      const futureDays = Math.max(1, Math.round((endMs - lastObservedMs) / 86400000));
+      rangeInfo.textContent = pastDays + " days observed · " + futureDays + " days forecast";
+
+      function setTime(ms, fromSlider) {
+        const clamped = Math.min(Math.max(ms, startMs), endMs);
+        exports.buildAurora(clamped);
+        uploadAurora();
+        updateBodies(clamped);
+        updateSolarWind(clamped);
+
+        const kp = exports.kpAtTime(clamped);
+        const observed = clamped <= lastObservedMs;
+        timeLabel.textContent = formatUtc(clamped);
+        kpLabel.textContent = kp.toFixed(2) + (observed ? " (observed)" : " (forecast)");
+        captionKp.textContent = kp.toFixed(2) + (observed ? " observed" : " forecast");
+        statusEl.textContent = observed ? "Kp OBSERVED" : "Kp FORECAST";
+        statusEl.classList.toggle("predicted", !observed);
+
+        const peakN = exports.auroraPeakNorth();
+        const peakS = exports.auroraPeakSouth();
+        const peak = Math.max(peakN, peakS);
+        let grade = "weak";
+        if (peak >= 35) grade = "storm";
+        else if (peak >= 15) grade = "strong";
+        else if (peak >= 7) grade = "moderate";
+        auraLabel.textContent = "N " + peakN.toFixed(0) + "% · S " + peakS.toFixed(0) + "% · " + grade;
+        gaugeFill.style.width = Math.min(100, (peak / 50) * 100).toFixed(1) + "%";
+        gaugeFill.style.background = activityColor(peak);
+
+        if (!fromSlider) slider.value = String(Math.round((clamped - startMs) / 60000));
+      }
+
+      let pendingSliderMs = null;
+      let sliderFrame = 0;
+      slider.addEventListener("input", () => {
+        pendingSliderMs = startMs + Number(slider.value) * 60000;
+        if (!sliderFrame) {
+          sliderFrame = requestAnimationFrame(() => {
+            sliderFrame = 0;
+            if (pendingSliderMs === null) return;
+            const requested = pendingSliderMs;
+            pendingSliderMs = null;
+            setTime(requested, true);
+          });
+        }
+      });
+      nowBtn.addEventListener("click", () => {
+        setTime(Date.now(), false);
+      });
+      focusMoon.addEventListener("click", () => focusBody("moon"));
+      focusSun.addEventListener("click", () => focusBody("sun"));
+      fieldBtn.addEventListener("click", () => setFieldLinesEnabled(!fieldLinesEnabled));
+      windBtn.addEventListener("click", () => setWindEnabled(!windEnabled));
+      lockBtn.addEventListener("click", () => setEarthLocked(!earthLocked));
+
+      refLabel.textContent = Number.isFinite(forecastMs) ? formatShort(forecastMs) + " UTC" : "—";
+
+      setTime(defaultMs, false);
+
+      // ---------------------------------------------------------------------
+      // Interaction + render loop
+      // ---------------------------------------------------------------------
+
+      let yaw = 0.55;
+      let pitch = 0.42;
+      let distance = 5.5;
+      let panX = 0;
+      let panY = 0;
+      let dragging = false;
+      let dragMode = "rotate";
+      let lastX = 0;
+      let lastY = 0;
+
+      function applyPan() {
+        const limit = distance * 0.9;
+        panX = Math.max(-limit, Math.min(limit, panX));
+        panY = Math.max(-limit, Math.min(limit, panY));
+        exports.setPan(panX, panY);
+      }
+
+      // Pan the view by a screen-space delta (CSS pixels).
+      function panBy(dx, dy) {
+        const rect = canvas.getBoundingClientRect();
+        const halfH = Math.tan(FOV_Y / 2) * distance;
+        const halfW = halfH * (rect.width / Math.max(1, rect.height));
+        panX -= dx * (2 * halfW / Math.max(1, rect.width));
+        panY += dy * (2 * halfH / Math.max(1, rect.height));
+        applyPan();
+      }
+
+      // Zoom to nextDistance keeping the world point under (clientX, clientY) fixed.
+      function zoomAround(clientX, clientY, requestedDistance) {
+        const nextDistance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, requestedDistance));
+        if (nextDistance === distance) return;
+        const rect = canvas.getBoundingClientRect();
+        const ndcX = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+        const ndcY = 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2;
+        const aspect = rect.width / Math.max(1, rect.height);
+        const tanHalf = Math.tan(FOV_Y / 2);
+
+        const oldHalfH = tanHalf * distance;
+        const oldHalfW = oldHalfH * aspect;
+        const newHalfH = tanHalf * nextDistance;
+        const newHalfW = newHalfH * aspect;
+        const worldX = panX + ndcX * oldHalfW;
+        const worldY = panY + ndcY * oldHalfH;
+        panX = worldX - ndcX * newHalfW;
+        panY = worldY - ndcY * newHalfH;
+        distance = nextDistance;
+        applyPan();
+        exports.setZoom(distance);
+      }
+
+      // Pointer input. Mouse: drag rotates, right/middle/Shift-drag pans.
+      // Touch: one finger rotates, two fingers pinch-zoom and pan, double-tap resets.
+      const activePointers = new Map();
+      const TAP_SLOP = 10;
+      const TAP_MAX_MS = 350;
+      const DOUBLE_TAP_MS = 300;
+      let pinchSpan = 0;
+      let pinchMidX = 0;
+      let pinchMidY = 0;
+      let downX = 0;
+      let downY = 0;
+      let downTime = 0;
+      let gestureMoved = false;
+      let lastTapTime = 0;
+      let lastTapX = 0;
+      let lastTapY = 0;
+
+      function pinchState() {
+        const [a, b] = activePointers.values();
+        return {
+          span: Math.hypot(b.x - a.x, b.y - a.y),
+          midX: (a.x + b.x) / 2,
+          midY: (a.y + b.y) / 2,
+        };
+      }
+
+      function startPinch() {
+        const state = pinchState();
+        pinchSpan = state.span;
+        pinchMidX = state.midX;
+        pinchMidY = state.midY;
+        dragMode = "pinch";
+        dragging = true;
+        gestureMoved = true; // a multi-finger gesture is never a tap
+        canvas.classList.remove("dragging");
+        canvas.classList.add("panning");
+      }
+
+      canvas.addEventListener("pointerdown", (event) => {
+        activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* pointer already gone */ }
+        event.preventDefault();
+
+        if (activePointers.size >= 2) {
+          if (activePointers.size === 2) startPinch();
+          return;
+        }
+        dragMode = event.button === 2 || event.button === 1 || event.shiftKey ? "pan" : "rotate";
+        dragging = true;
+        lastX = downX = event.clientX;
+        lastY = downY = event.clientY;
+        downTime = performance.now();
+        gestureMoved = false;
+        canvas.classList.add(dragMode === "pan" ? "panning" : "dragging");
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        const pointer = activePointers.get(event.pointerId);
+        if (!pointer || !dragging) return;
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+
+        if (dragMode === "pinch") {
+          if (activePointers.size < 2) return;
+          const state = pinchState();
+          if (pinchSpan > 0 && state.span > 0) {
+            zoomAround(state.midX, state.midY, distance * (pinchSpan / state.span));
+          }
+          panBy(state.midX - pinchMidX, state.midY - pinchMidY);
+          pinchSpan = state.span;
+          pinchMidX = state.midX;
+          pinchMidY = state.midY;
+          return;
+        }
+
+        const dx = event.clientX - lastX;
+        const dy = event.clientY - lastY;
+        lastX = event.clientX;
+        lastY = event.clientY;
+        if (Math.hypot(event.clientX - downX, event.clientY - downY) > TAP_SLOP) gestureMoved = true;
+
+        if (dragMode === "pan") {
+          panBy(dx, dy);
+        } else {
+          yaw += dx * 0.005;
+          pitch = Math.max(-1.45, Math.min(1.45, pitch + dy * 0.005));
+          exports.setRotation(yaw, pitch);
+        }
+      });
+
+      function handleTap(event) {
+        // Tapping the globe closes the expanded HUD on phones.
+        if (hud.classList.contains("expanded")) setHudExpanded(false);
+        // Mouse double-clicks go through the native dblclick listener below.
+        if (event.pointerType !== "touch") return;
+        const now = performance.now();
+        const near = Math.hypot(event.clientX - lastTapX, event.clientY - lastTapY) < 30;
+        if (now - lastTapTime < DOUBLE_TAP_MS && near) {
+          lastTapTime = 0;
+          resetView();
+        } else {
+          lastTapTime = now;
+          lastTapX = event.clientX;
+          lastTapY = event.clientY;
+        }
+      }
+
+      function endPointer(event) {
+        const tracked = activePointers.delete(event.pointerId);
+        try {
+          if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        } catch (_) { /* ignore */ }
+
+        if (activePointers.size >= 2) {
+          startPinch();
+          return;
+        }
+        if (activePointers.size === 1) {
+          // One finger lifted mid-pinch: keep rotating from the remaining finger without a jump.
+          const [rest] = activePointers.values();
+          lastX = rest.x;
+          lastY = rest.y;
+          dragMode = "rotate";
+          canvas.classList.remove("panning");
+          canvas.classList.add("dragging");
+          return;
+        }
+
+        const isTap = tracked && event.type === "pointerup" && !gestureMoved
+          && performance.now() - downTime < TAP_MAX_MS;
+        dragging = false;
+        dragMode = "rotate";
+        canvas.classList.remove("dragging", "panning");
+        if (isTap) handleTap(event);
+      }
+      canvas.addEventListener("pointerup", endPointer);
+      canvas.addEventListener("pointercancel", endPointer);
+      canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+      // iOS Safari: keep pinches on the globe from zooming the page.
+      canvas.addEventListener("gesturestart", (event) => event.preventDefault());
+
+      canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+        zoomAround(event.clientX, event.clientY, distance * Math.exp(delta * 0.0012));
+      }, { passive: false });
+
+      function resetView() {
+        yaw = 0.55;
+        pitch = 0.42;
+        distance = 5.5;
+        panX = 0;
+        panY = 0;
+        exports.setRotation(yaw, pitch);
+        exports.setZoom(distance);
+        exports.setPan(0, 0);
+      }
+      canvas.addEventListener("dblclick", resetView);
+      window.addEventListener("keydown", (event) => {
+        if ((event.key === "r" || event.key === "R") && event.target.tagName !== "INPUT") resetView();
+      });
+
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+        const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+        gl.viewport(0, 0, width, height);
+        exports.setViewport(width, height);
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      exports.setRotation(yaw, pitch);
+      exports.setZoom(distance);
+      exports.setPan(panX, panY);
+
+      const modelView = new Float32Array(memory.buffer, exports.modelPtr(), 16);
+      const celestialView = new Float32Array(memory.buffer, exports.celestialPtr(), 16);
+      const viewView = new Float32Array(memory.buffer, exports.viewPtr(), 16);
+      const projectionView = new Float32Array(memory.buffer, exports.projectionPtr(), 16);
+
+      function bindEarthBuffers() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.enableVertexAttribArray(earthProgram.attributes.aPosition);
+        gl.vertexAttribPointer(earthProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+        gl.enableVertexAttribArray(earthProgram.attributes.aNormal);
+        gl.vertexAttribPointer(earthProgram.attributes.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+        gl.enableVertexAttribArray(earthProgram.attributes.aUV);
+        gl.vertexAttribPointer(earthProgram.attributes.aUV, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      }
+
+      function bindAuroraBuffers() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.enableVertexAttribArray(auroraProgram.attributes.aPosition);
+        gl.vertexAttribPointer(auroraProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+        gl.enableVertexAttribArray(auroraProgram.attributes.aUV);
+        gl.vertexAttribPointer(auroraProgram.attributes.aUV, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      }
+
+      function bindCelestialBuffers() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.enableVertexAttribArray(celestialProgram.attributes.aPosition);
+        gl.vertexAttribPointer(celestialProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+        gl.enableVertexAttribArray(celestialProgram.attributes.aNormal);
+        gl.vertexAttribPointer(celestialProgram.attributes.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      }
+
+      function drawSolarWind() {
+        if (!windEnabled || !windReady) return;
+        gl.useProgram(windProgram.program);
+        gl.uniformMatrix4fv(windProgram.uniforms.uModel, false, celestialView);
+        gl.uniformMatrix4fv(windProgram.uniforms.uView, false, viewView);
+        gl.uniformMatrix4fv(windProgram.uniforms.uProjection, false, projectionView);
+        gl.uniform3fv(windProgram.uniforms.uRight, windRight);
+        gl.uniform3fv(windProgram.uniforms.uUp, windUp);
+        gl.uniform3fv(windProgram.uniforms.uFlowDir, windFlowDir);
+        gl.uniform3f(windProgram.uniforms.uColor, 0.42, 0.80, 1.0);
+        gl.uniform1f(windProgram.uniforms.uAlpha, windAlpha);
+        gl.uniform1f(windProgram.uniforms.uPhase, windPhase);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, windPositionBuffer);
+        gl.enableVertexAttribArray(windProgram.attributes.aPosition);
+        gl.vertexAttribPointer(windProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, windFlowBuffer);
+        gl.enableVertexAttribArray(windProgram.attributes.aFlow);
+        gl.vertexAttribPointer(windProgram.attributes.aFlow, 1, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, windIndexBuffer);
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        gl.drawElements(gl.TRIANGLES, windIndexCount, gl.UNSIGNED_SHORT, 0);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      function drawFieldLines() {
+        if (!fieldLinesEnabled || !fieldLineReady) return;
+        gl.useProgram(fieldLineProgram.program);
+        gl.uniformMatrix4fv(fieldLineProgram.uniforms.uModel, false, modelView);
+        gl.uniformMatrix4fv(fieldLineProgram.uniforms.uView, false, viewView);
+        gl.uniformMatrix4fv(fieldLineProgram.uniforms.uProjection, false, projectionView);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, fieldLinePositionBuffer);
+        gl.enableVertexAttribArray(fieldLineProgram.attributes.aPosition);
+        gl.vertexAttribPointer(fieldLineProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, fieldLineNormalBuffer);
+        gl.enableVertexAttribArray(fieldLineProgram.attributes.aNormal);
+        gl.vertexAttribPointer(fieldLineProgram.attributes.aNormal, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, fieldLineIntensityBuffer);
+        gl.enableVertexAttribArray(fieldLineProgram.attributes.aIntensity);
+        gl.vertexAttribPointer(fieldLineProgram.attributes.aIntensity, 1, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, fieldLineIndexBuffer);
+
+        gl.enable(gl.DEPTH_TEST);
+        gl.disable(gl.BLEND);
+        gl.depthMask(true);
+        gl.drawElements(gl.TRIANGLES, fieldLineIndexCount, gl.UNSIGNED_SHORT, 0);
+      }
+
+      function drawLinks() {
+        if (!bodyState) return;
+        gl.useProgram(lineProgram.program);
+        gl.uniformMatrix4fv(lineProgram.uniforms.uModel, false, celestialView);
+        gl.uniformMatrix4fv(lineProgram.uniforms.uView, false, viewView);
+        gl.uniformMatrix4fv(lineProgram.uniforms.uProjection, false, projectionView);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+        gl.enableVertexAttribArray(lineProgram.attributes.aPosition);
+        gl.vertexAttribPointer(lineProgram.attributes.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+        gl.lineWidth(2);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        gl.uniform4f(lineProgram.uniforms.uColor, 1.0, 0.78, 0.28, 0.95);
+        gl.drawArrays(gl.LINES, 0, 2);
+        gl.uniform4f(lineProgram.uniforms.uColor, 0.48, 0.68, 1.0, 0.95);
+        gl.drawArrays(gl.LINES, 2, 2);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      const camera = new Float32Array(3);
+
+      function draw() {
+        exports.computeMatrices();
+
+        gl.clearColor(0.006, 0.012, 0.028, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.disable(gl.CULL_FACE);
+        gl.disable(gl.BLEND);
+
+        // Earth
+        gl.useProgram(earthProgram.program);
+        gl.uniformMatrix4fv(earthProgram.uniforms.uModel, false, modelView);
+        gl.uniformMatrix4fv(earthProgram.uniforms.uView, false, viewView);
+        gl.uniformMatrix4fv(earthProgram.uniforms.uProjection, false, projectionView);
+        camera[0] = panX;
+        camera[1] = panY;
+        camera[2] = exports.cameraDistanceValue();
+        gl.uniform3fv(earthProgram.uniforms.uCamera, camera);
+
+        const sunDirWorld = new Float32Array(3);
+        if (bodyState) {
+          const x = bodyState.sun.x;
+          const y = bodyState.sun.y;
+          const z = bodyState.sun.z;
+          let lx = celestialView[0] * x + celestialView[4] * y + celestialView[8] * z;
+          let ly = celestialView[1] * x + celestialView[5] * y + celestialView[9] * z;
+          let lz = celestialView[2] * x + celestialView[6] * y + celestialView[10] * z;
+          const len = Math.hypot(lx, ly, lz) || 1;
+          sunDirWorld[0] = lx / len;
+          sunDirWorld[1] = ly / len;
+          sunDirWorld[2] = lz / len;
+        } else {
+          sunDirWorld[0] = -0.45;
+          sunDirWorld[1] = 0.62;
+          sunDirWorld[2] = 0.82;
+        }
+        gl.uniform3fv(earthProgram.uniforms.uSunDir, sunDirWorld);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, earthTexture);
+        gl.uniform1i(earthProgram.uniforms.uEarth, 0);
+        bindEarthBuffers();
+        gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+
+        drawLinks();
+
+        // Sun and Moon are opaque bodies in the celestial frame. The
+        // light direction is the real geocentric Sun direction.
+        if (bodyState) {
+          gl.useProgram(celestialProgram.program);
+          gl.uniformMatrix4fv(celestialProgram.uniforms.uModel, false, celestialView);
+          gl.uniformMatrix4fv(celestialProgram.uniforms.uView, false, viewView);
+          gl.uniformMatrix4fv(celestialProgram.uniforms.uProjection, false, projectionView);
+          gl.uniform3fv(celestialProgram.uniforms.uCamera, camera);
+          gl.uniform3fv(celestialProgram.uniforms.uSunDir, sunDirWorld);
+          bindCelestialBuffers();
+
+          const sun = bodyState.sun;
+          gl.uniform3f(celestialProgram.uniforms.uCenter, sun.x * sun.visualDistance, sun.y * sun.visualDistance, sun.z * sun.visualDistance);
+          gl.uniform1f(celestialProgram.uniforms.uRadius, sun.visualRadius);
+          gl.uniform1f(celestialProgram.uniforms.uSunMode, 1.0);
+          gl.uniform3f(celestialProgram.uniforms.uBodyColor, 1.0, 0.93, 0.68);
+          gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+
+          const moon = bodyState.moon;
+          gl.uniform3f(celestialProgram.uniforms.uCenter, moon.x * moon.visualDistance, moon.y * moon.visualDistance, moon.z * moon.visualDistance);
+          gl.uniform1f(celestialProgram.uniforms.uRadius, moon.visualRadius);
+          gl.uniform1f(celestialProgram.uniforms.uSunMode, 0.0);
+          gl.uniform3f(celestialProgram.uniforms.uBodyColor, 0.72, 0.75, 0.80);
+          gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+        }
+
+        drawSolarWind();
+
+        // Aurora volume: the same OVATION oval extruded through a modelled
+        // altitude profile. This is not an observed 3D retrieval.
+        gl.useProgram(auroraProgram.program);
+        gl.uniformMatrix4fv(auroraProgram.uniforms.uModel, false, modelView);
+        gl.uniformMatrix4fv(auroraProgram.uniforms.uView, false, viewView);
+        gl.uniformMatrix4fv(auroraProgram.uniforms.uProjection, false, projectionView);
+        gl.uniform2f(auroraProgram.uniforms.uTexel, 1.0 / auroraW, 1.0 / auroraH);
+        gl.uniform3fv(auroraProgram.uniforms.uCamera, camera);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, auroraTexture);
+        gl.uniform1i(auroraProgram.uniforms.uAurora, 0);
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        bindAuroraBuffers();
+        for (const layer of AURORA_LAYERS) {
+          gl.uniform1f(auroraProgram.uniforms.uScale, 1 + layer.altKm / EARTH_RADIUS_KM);
+          gl.uniform1f(auroraProgram.uniforms.uLayerAlpha, layer.alpha);
+          gl.uniform3f(auroraProgram.uniforms.uTint, layer.tint[0], layer.tint[1], layer.tint[2]);
+          gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+        }
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+
+        drawFieldLines();
+
+        requestAnimationFrame(draw);
+      }
+
+      requestAnimationFrame(draw);
+      if (TOUCH_FIRST) showStartScreen();
+      else overlay.classList.add("hidden");
+
+      // periodic refresh of the OVATION snapshot (every 5 minutes)
+      setInterval(async () => {
+        try {
+          const fresh = await fetchJson(OVATION_URL);
+          const freshGrid = new Float32Array(memory.buffer, exports.auroraGridPtr(), gridW * gridH);
+          freshGrid.fill(0);
+          for (const point of fresh.coordinates) {
+            const lon = point[0] | 0;
+            const lat = point[1] | 0;
+            if (lon >= 0 && lon < gridW && lat >= -90 && lat <= 90) {
+              freshGrid[lon * gridH + (lat + 90)] = Number(point[2]) || 0;
+            }
+          }
+          exports.smoothAuroraGrid();
+          const freshTime = Date.parse(fresh["Forecast Time"]);
+          exports.setReferenceKp(exports.kpAtTime(freshTime));
+          if (Number.isFinite(freshTime)) refLabel.textContent = formatShort(freshTime) + " UTC";
+          const current = Number(slider.value) * 60000 + startMs;
+          exports.buildAurora(current);
+          uploadAurora();
+        } catch (error) {
+          console.warn("OVATION refresh skipped", error);
+        }
+      }, 300000);
+    }
+
+    main().catch((error) => {
+      console.error(error);
+      fail("Error: " + (error && error.message ? error.message : String(error)));
+    });
+  </script>
+</body>
+</html>
